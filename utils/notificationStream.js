@@ -16,7 +16,6 @@ const addClient = (req, res) => {
     clients.push(newClient);
 
     req.on('close', () => {
-        console.log(`${clientId} Connection closed`);
         const index = clients.findIndex(c => c.id === clientId);
         if (index !== -1) {
             clients.splice(index, 1);

@@ -4,10 +4,9 @@ const Settings = require('../models/Settings');
 
 router.get('/', async (req, res) => {
     try {
-        // Find existing settings or create default
         let settings = await Settings.findOne({});
         if (!settings) {
-            settings = new Settings({}); // Assuming default constructor works or schema allows empty
+            settings = new Settings({});
             await settings.save();
         }
         res.json(settings);

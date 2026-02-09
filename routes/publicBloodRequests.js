@@ -2,8 +2,7 @@ const express = require('express');
 const router = express.Router();
 const bloodRequestController = require('../controllers/bloodRequestController');
 
-router.post('/', bloodRequestController.createBloodRequest);
-router.get('/', bloodRequestController.getAllBloodRequests);
+// Public endpoints for donor tracker
 router.get('/:id', bloodRequestController.getBloodRequestById);
 router.post('/confirm', bloodRequestController.confirmDonation);
 

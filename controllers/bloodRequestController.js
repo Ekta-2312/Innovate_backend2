@@ -6,8 +6,6 @@ const Notification = require('../models/Notification');
 const { sendSMS, getSMSTemplate, formatSMSMessage } = require('../services/smsService');
 const { broadcastNotification } = require('../utils/notificationStream');
 
-
-
 // Send next batch of SMS
 const sendNextBatch = async (requestId) => {
   try {
@@ -15,14 +13,13 @@ const sendNextBatch = async (requestId) => {
     if (!request) return;
 
     // Check if request is already fulfilled or cancelled
-    if (request.status === 'fulfilled' || request.status === 'cancelled') {
+    if (request.status === 'fulfilled' || request.status === 'cancelled' || request.status === 'expired') {
       return;
     }
 
     // Check if queue is empty
     if (request.remainingDonorsQueue.length === 0) {
       console.log(`[Batch] No more donors in queue for request ${requestId}`);
-      // Optional: Mark as completed if no donors left? Or just leave as pending.
       return;
     }
 
@@ -44,7 +41,6 @@ const sendNextBatch = async (requestId) => {
     console.log(`\n📦 === SENDING BATCH SMS ===`);
     console.log(`Request ID: ${requestId}`);
     console.log(`Batch Size: ${nextBatchIds.length}`);
-    console.log(`Remaining in queue: ${request.remainingDonorsQueue.length}`);
 
     // Fetch donor details
     const donors = await Donor.find({ _id: { $in: nextBatchIds } });
@@ -102,7 +98,6 @@ const sendNextBatch = async (requestId) => {
 
         if (smsResult.success) {
           smsSuccessCount++;
-          // Create success notification
           try {
             const notif = await Notification.create({
               hospitalId: hospital.id,
@@ -133,13 +128,8 @@ const sendNextBatch = async (requestId) => {
 const createBloodRequest = async (req, res) => {
   try {
     const { bloodGroup, quantity, urgency, requiredBy, description, patientAge, patientCondition } = req.body;
-    const hospital = req.user; // From JWT token
+    const hospital = req.user;
 
-    console.log('\n🩸 === CREATING NEW BLOOD REQUEST (BATCH MODE) ===');
-    console.log('Hospital:', hospital.name);
-    console.log('Blood Group:', bloodGroup);
-
-    // Create and save the blood request
     const bloodRequest = new BloodRequest({
       hospitalId: hospital.id,
       bloodGroup,
@@ -150,45 +140,32 @@ const createBloodRequest = async (req, res) => {
       patientAge,
       patientCondition,
       confirmedUnits: 0,
-      batchSize: 1, // 1 donor per batch for testing
-      responseWindow: 2, // 2 minutes window for testing
-      batchInProgress: false
+      batchSize: 1,
+      responseWindow: 2,
+      batchInProgress: false,
+      status: 'active'
     });
 
-    // Find eligible donors first
     const allDonors = await Donor.find({});
-
-    // Filter logic (Exact match + 3 months rule)
     const matchingDonors = allDonors.filter(donor => {
       const donorBloodGroup = donor.bloodGroup || donor["Blood Group"];
-
-      // 3 month rule
       if (donor.lastDonationDate) {
         const lastDonation = new Date(donor.lastDonationDate);
         const threeMonthsAgo = new Date();
         threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
         if (lastDonation > threeMonthsAgo) return false;
       }
-
-      // Blood group match
       const normalizedRequested = bloodGroup.replace(/\s+/g, '').toUpperCase();
       const normalizedDonor = donorBloodGroup ? donorBloodGroup.replace(/\s+/g, '').toUpperCase() : '';
       return normalizedDonor === normalizedRequested;
     });
 
-    // Sort donors (optional - can be by distance or last donation, simple sort by ID or name for now)
     matchingDonors.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-
-    // Add donors to queue
     const donorIds = matchingDonors.map(d => d._id);
     bloodRequest.remainingDonorsQueue = donorIds;
 
-    console.log(`Found ${donorIds.length} eligible donors. Added to queue.`);
-
     await bloodRequest.save();
-    console.log('✅ Blood request saved with ID:', bloodRequest._id);
 
-    // Initial Notification
     try {
       const notification = await Notification.create({
         hospitalId: hospital.id,
@@ -198,87 +175,114 @@ const createBloodRequest = async (req, res) => {
         meta: { bloodRequestId: bloodRequest._id }
       });
       broadcastNotification(notification);
-    } catch (e) {
-      console.error('Failed to create notification:', e.message);
-    }
+    } catch (e) { }
 
-    // Trigger first batch asynchronously
     sendNextBatch(bloodRequest._id);
 
-    // Return success response immediately
     res.status(201).json({
       success: true,
-      message: 'Blood request created. SMS batch processing started.',
-      data: {
-        requestId: bloodRequest._id,
-        bloodGroup: bloodRequest.bloodGroup,
-        quantity: bloodRequest.quantity,
-        matchingDonors: matchingDonors.length,
-        status: 'processing'
-      }
+      data: { requestId: bloodRequest._id }
     });
 
   } catch (error) {
-    console.error('Error in blood request:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to create blood request',
-      error: error.message
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 };
 
-// Get all blood requests
 const getAllBloodRequests = async (req, res) => {
   try {
-    const requests = await BloodRequest.find({})
-      .populate('hospitalId', 'name')
-      .sort({ createdAt: -1 });
-
-    res.json({
-      success: true,
-      data: requests
-    });
+    const requests = await BloodRequest.find({}).populate('hospitalId', 'name').sort({ createdAt: -1 });
+    res.json({ success: true, data: requests });
   } catch (error) {
-    console.error('Error fetching blood requests:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to fetch blood requests',
-      error: error.message
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 };
 
-// Get blood request by ID
 const getBloodRequestById = async (req, res) => {
   try {
     const { id } = req.params;
     const request = await BloodRequest.findById(id).populate('hospitalId', 'name');
 
     if (!request) {
-      return res.status(404).json({
-        success: false,
-        message: 'Blood request not found'
+      return res.status(404).json({ success: false, message: 'Blood request not found' });
+    }
+
+    const now = new Date();
+    const isExpired = now > new Date(request.requiredBy);
+    const isFull = request.confirmedUnits >= request.quantity;
+
+    // Check if we need to update status automatically
+    if (request.status === 'active') {
+      if (isFull) {
+        request.status = 'fulfilled';
+        await request.save();
+      } else if (isExpired) {
+        request.status = 'expired';
+        await request.save();
+      }
+    }
+
+    // Requirements: If not active, or fulfilled, or expired -> return closed
+    if (request.status !== 'active' || isFull || isExpired) {
+      return res.json({
+        success: true,
+        status: 'closed',
+        message: 'Blood request fulfilled. Thank you.'
       });
+    }
+
+    res.json({ success: true, data: request });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+const confirmDonation = async (req, res) => {
+  try {
+    const { requestId } = req.body;
+    const now = new Date();
+
+    // Atomic update to prevent race conditions and overbooking
+    // Criteria: ID matches, status is active, confirmed < quantity, and not expired
+    const updatedRequest = await BloodRequest.findOneAndUpdate(
+      {
+        _id: requestId,
+        status: 'active',
+        $expr: { $lt: ['$confirmedUnits', '$quantity'] },
+        requiredBy: { $gte: now }
+      },
+      { $inc: { confirmedUnits: 1 } },
+      { new: true }
+    );
+
+    if (!updatedRequest) {
+      return res.status(400).json({
+        success: false,
+        message: 'Blood request already fulfilled or expired.'
+      });
+    }
+
+    // After increment, check if it just became fulfilled
+    if (updatedRequest.confirmedUnits >= updatedRequest.quantity) {
+      updatedRequest.status = 'fulfilled';
+      await updatedRequest.save();
     }
 
     res.json({
       success: true,
-      data: request
+      message: 'Donation confirmed successfully.',
+      data: updatedRequest
     });
   } catch (error) {
-    console.error('Error fetching blood request:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to fetch blood request',
-      error: error.message
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 };
+
 
 module.exports = {
   createBloodRequest,
   getAllBloodRequests,
   getBloodRequestById,
+  confirmDonation,
   sendNextBatch
 };

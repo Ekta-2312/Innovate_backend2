@@ -231,6 +231,7 @@ function authenticateToken(req, res, next) {
    4. Routes
 ============================ */
 app.use('/blood-requests', authenticateToken, bloodRequestsRouter);
+app.use('/api/bloodrequest', require('./routes/publicBloodRequests'));
 app.use('/donor-response', authenticateToken, donorResponseRouter);
 app.use('/donors', authenticateToken, donorsRouter);
 app.use('/hospitals', authenticateToken, hospitalsRouter);

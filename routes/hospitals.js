@@ -11,7 +11,6 @@ router.get('/', async (req, res) => {
     }
 });
 
-// Add placeholder POST
 router.post('/', async (req, res) => {
     try {
         const hospital = new Hospital(req.body);
