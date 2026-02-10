@@ -2111,7 +2111,7 @@ app.get('/dashboard', authenticateToken, (req, res) => {
 app.listen(5000, '0.0.0.0', () => {
   console.log('🚀 Server running on port 5000');
   console.log('📡 Server accessible from:');
-  console.log('   - Local: http://https://innovate-backend2.onrender.com');
+  console.log('   - Local: https://innovate-backend2.onrender.com');
   console.log('   - Network: http://0.0.0.0:5000');
   console.log('   - If using ngrok: https://YOUR_NGROK_URL');
 });
