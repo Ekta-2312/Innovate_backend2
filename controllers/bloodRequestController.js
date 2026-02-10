@@ -81,7 +81,7 @@ const sendNextBatch = async (requestId) => {
           quantity: request.quantity,
           urgency: urgencyText,
           donorName: donorName,
-          responseUrl: `https://donor-tracker-msrl.vercel.app/${request._id}`,
+          responseUrl: `https://innovate-tracker2.vercel.app/${request._id}`,
         };
 
         let message;
